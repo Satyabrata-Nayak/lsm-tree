@@ -1,0 +1,11 @@
+build/
+*.tmp
+*.db
+__pycache__/
+.DS_Store
+
+# Personal project-planning doc (not part of the deliverable)
+MiniLSM_Project_Plan.md
+
+# Local VS Code editor config (machine-specific compiler path)
+.vscode/
