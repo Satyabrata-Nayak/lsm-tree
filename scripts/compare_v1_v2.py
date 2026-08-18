@@ -10,7 +10,7 @@ import os
 METRICS = [
     ("total_ops_per_second", "total_ops/s"),
     ("read_ops_per_second", "read_ops/s"),
-    ("read_p99_us", "read_p99_us"),
+    ("read_latency_us.p99", "read_p99_us"),
     ("sstable_count", "sstables"),
     ("bloom_checks", "bloom_checks"),
     ("bloom_negative_hits", "bloom_neg"),
@@ -26,6 +26,15 @@ def load(path):
         return json.load(handle)
 
 
+def value(results, key):
+    current = results
+    for part in key.split("."):
+        current = current.get(part, 0)
+        if not isinstance(current, dict):
+            continue
+    return current
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dir-v1", default="build/v1_results")
@@ -37,7 +46,7 @@ def main():
         v1 = load(os.path.join(args.dir_v1, args.detail))["results"]
         v2 = load(os.path.join(args.dir_v2, args.detail))["results"]
         for key, label in METRICS:
-            print(f"{label:<22} v1={v1.get(key, 0):>14}  v2={v2.get(key, 0):>14}")
+            print(f"{label:<22} v1={value(v1, key):>14}  v2={value(v2, key):>14}")
         return
 
     v1_files = sorted(
@@ -56,8 +65,8 @@ def main():
         v2 = load(os.path.join(args.dir_v2, name))["results"]
         row = f"{name:<52}"
         for key, _ in METRICS:
-            old = v1.get(key, 0)
-            new = v2.get(key, 0)
+            old = value(v1, key)
+            new = value(v2, key)
             if old == 0 and new == 0:
                 row += f"{'0':>14}"
             elif old == 0:

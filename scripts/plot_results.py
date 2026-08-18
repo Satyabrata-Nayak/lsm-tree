@@ -87,10 +87,11 @@ def main():
             x = [p["value"] for p in points]
             labels = [label(v) for v in x]
 
-            write_ops = [p["data"].get("write_ops_per_second", 0) for p in points]
-            read_ops = [p["data"].get("read_ops_per_second", 0) for p in points]
-            write_p99 = [p["data"].get("write_p99_us", 0) for p in points]
-            read_p99 = [p["data"].get("read_p99_us", 0) for p in points]
+            results = [p["data"]["results"] for p in points]
+            write_ops = [r["write_ops_per_second"] for r in results]
+            read_ops = [r["read_ops_per_second"] for r in results]
+            write_p99 = [r["write_latency_us"]["p99"] for r in results]
+            read_p99 = [r["read_latency_us"]["p99"] for r in results]
 
             fig, axes = plt.subplots(2, 2, figsize=(11, 8))
             fig.suptitle(f"{workload}  (sweep: {dim})", fontsize=13)
