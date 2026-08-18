@@ -10,7 +10,9 @@ LDFLAGS += -isysroot $(MACOS_SDK)
 endif
 
 BUILD_DIR := build
-LIB_OBJECT := $(BUILD_DIR)/lsm.o
+LIB_OBJECTS := $(BUILD_DIR)/bloom.o $(BUILD_DIR)/sstable.o \
+	$(BUILD_DIR)/wal.o $(BUILD_DIR)/recovery.o $(BUILD_DIR)/compaction.o \
+	$(BUILD_DIR)/lsm.o
 TOOL := $(BUILD_DIR)/lsm_tool
 TEST := $(BUILD_DIR)/test_lsm
 
@@ -21,13 +23,15 @@ all: $(TOOL)
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(LIB_OBJECT): src/lsm.cpp include/lsm/lsm.h | $(BUILD_DIR)
+HEADERS := $(wildcard include/lsm/*.h)
+
+$(BUILD_DIR)/%.o: src/%.cpp $(HEADERS) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
-$(TOOL): src/main.cpp $(LIB_OBJECT)
+$(TOOL): src/main.cpp $(LIB_OBJECTS)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) $^ -o $@
 
-$(TEST): tests/test_lsm.cpp $(LIB_OBJECT)
+$(TEST): tests/test_lsm.cpp $(LIB_OBJECTS)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) $^ -o $@
 
 test: $(TEST)
