@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.db binary
+*.dat binary
+*.wal binary
+*.tmp binary

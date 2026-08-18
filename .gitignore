@@ -4,6 +4,9 @@ build/
 __pycache__/
 .DS_Store
 
+# Generated benchmark reports (machine-specific numbers)
+benchmarks/results/*.json
+
 # Personal project-planning doc (not part of the deliverable)
 MiniLSM_Project_Plan.md
 
