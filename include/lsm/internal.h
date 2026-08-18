@@ -15,12 +15,13 @@ namespace lsm {
 namespace internal {
 
 constexpr std::uint32_t kWalMagic = 0x314C4157U;    // WAL1
-constexpr std::uint32_t kTableMagic = 0x31545353U;  // SST1
-constexpr std::uint32_t kVersion = 1;
+constexpr std::uint32_t kTableMagic = 0x32545353U;  // SST2
+constexpr std::uint32_t kVersion = 2;
 constexpr std::size_t kWalHeader = 24;
-constexpr std::size_t kTableHeader = 24;
+constexpr std::size_t kTableHeader = 40;
 constexpr std::size_t kEntryHeader = 20;
 constexpr std::size_t kChecksum = 4;
+constexpr std::size_t kBlockTarget = 4096;
 constexpr std::uint32_t kMaxKey = 1U << 20;
 constexpr std::uint32_t kMaxValue = 16U << 20;
 

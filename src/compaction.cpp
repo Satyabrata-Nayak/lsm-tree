@@ -18,14 +18,15 @@ std::shared_ptr<Table> merge_tables(
     std::size_t bloom_bits_per_key) {
   std::map<std::string, Entry> merged;
   for (const auto& table : tables) {
-    for (const auto& [key, entry] : table->entries) {
-      const auto current = merged.find(key);
-      if (current == merged.end() ||
-          current->second.sequence < entry.sequence) {
-        merged[key] = entry;
-      }
+      for_each_entry(*table, [&merged](const std::string& key,
+                                       const Entry& entry) {
+        const auto current = merged.find(key);
+        if (current == merged.end() ||
+            current->second.sequence < entry.sequence) {
+          merged[key] = entry;
+        }
+      });
     }
-  }
   return write_table(directory, next_generation, bloom_bits_per_key, merged);
 }
 

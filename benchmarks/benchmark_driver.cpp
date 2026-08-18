@@ -310,6 +310,9 @@ int main(int argc, char** argv) {
             << " sstables=" << stats.sstable_count
             << " bloom_checks=" << stats.bloom_checks
             << " bloom_negative_hits=" << stats.bloom_negative_hits
+            << " sstable_reads=" << stats.sstable_reads
+            << " sstable_bytes_read=" << stats.sstable_bytes_read
+            << " table_metadata_bytes=" << stats.table_metadata_bytes
             << " db_size_bytes=" << db_size << " files=" << file_count << "\n";
 
   std::string json;
@@ -355,6 +358,12 @@ int main(int argc, char** argv) {
   json += "    \"bloom_checks\": " + std::to_string(stats.bloom_checks) + ",\n";
   json += "    \"bloom_negative_hits\": " +
           std::to_string(stats.bloom_negative_hits) + ",\n";
+  json += "    \"sstable_reads\": " + std::to_string(stats.sstable_reads) +
+          ",\n";
+  json += "    \"sstable_bytes_read\": " +
+          std::to_string(stats.sstable_bytes_read) + ",\n";
+  json += "    \"table_metadata_bytes\": " +
+          std::to_string(stats.table_metadata_bytes) + ",\n";
   json += "    \"database_size_bytes\": " + std::to_string(db_size) + ",\n";
   json += "    \"file_count\": " + std::to_string(file_count) + "\n";
   json += "  }\n";

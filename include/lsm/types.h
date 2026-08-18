@@ -19,6 +19,9 @@ struct Stats {
   std::uint64_t sequence = 0;
   std::uint64_t bloom_checks = 0;
   std::uint64_t bloom_negative_hits = 0;
+  std::uint64_t sstable_reads = 0;
+  std::uint64_t sstable_bytes_read = 0;
+  std::uint64_t table_metadata_bytes = 0;
 };
 
 struct Entry {

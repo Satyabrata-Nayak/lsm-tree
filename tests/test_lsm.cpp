@@ -1,5 +1,6 @@
 #include "lsm/lsm.h"
 
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -273,6 +274,70 @@ void test_corrupt_sstable_is_rejected() {
   reset(directory);
 }
 
+void test_sparse_index_across_blocks() {
+  const auto directory = test_directory("sparse-index");
+  reset(directory);
+  lsm::Options options;
+  options.memtable_bytes = 4 * 1024 * 1024;
+  options.bloom_bits_per_key = 10;
+  options.compaction_trigger = 4;
+  {
+    lsm::LSMTree database(directory, options);
+    // 500 zero-padded keys with 64-byte values: ~92 bytes per record, so the
+    // 4096-byte block target yields ~44 records per block and ~12 blocks.
+    char key[16];
+    std::string value(64, 'x');
+    for (int i = 0; i < 500; ++i) {
+      std::snprintf(key, sizeof(key), "key-%04d", i);
+      database.put(key, value);
+    }
+    database.flush();
+    CHECK(database.stats().sstable_count == 1);
+
+    // Reads that cross block boundaries.
+    for (int i = 0; i < 500; ++i) {
+      std::snprintf(key, sizeof(key), "key-%04d", i);
+      CHECK(database.get(key) == value);
+    }
+    // Misses before, between and after the key range.
+    CHECK(database.get("key-0000") == value);
+    CHECK(database.get("key-0499") == value);
+    CHECK(!database.get("key-0500").has_value());
+    CHECK(!database.get("aaa").has_value());
+    CHECK(!database.get("zzz").has_value());
+
+    // Range scan spanning several blocks.
+    const auto range = database.scan("key-0100", "key-0200");
+    CHECK(range.size() == 100);
+    CHECK(range.front().first == "key-0100");
+    CHECK(range.back().first == "key-0199");
+
+    // Tombstone in a later block hides an earlier value.
+    database.erase("key-0250");
+    database.flush();
+    CHECK(!database.get("key-0250").has_value());
+    CHECK(database.get("key-0249") == value);
+    CHECK(database.get("key-0251") == value);
+
+    // On-demand block reads were actually exercised.
+    CHECK(database.stats().sstable_reads > 0);
+    CHECK(database.stats().sstable_bytes_read > 0);
+    const auto stats = database.stats();
+    CHECK(stats.table_metadata_bytes > 0);
+    const auto table_path = directory / "sst-1.dat";
+    CHECK(stats.table_metadata_bytes < std::filesystem::file_size(table_path));
+  }
+  {
+    // Reopen: the sparse index is rebuilt from disk and still works.
+    lsm::LSMTree reopened(directory, options);
+    CHECK(reopened.get("key-0000") == std::string(64, 'x'));
+    CHECK(!reopened.get("key-0250").has_value());
+    CHECK(reopened.get("key-0499") == std::string(64, 'x'));
+    CHECK(reopened.scan("key-0100", "key-0200").size() == 100);
+  }
+  reset(directory);
+}
+
 }  // namespace
 
 int main() {
@@ -285,6 +350,7 @@ int main() {
   test_range_scan_reconciles_versions_and_tombstones();
   test_randomized_differential_replay();
   test_corrupt_sstable_is_rejected();
+  test_sparse_index_across_blocks();
   if (failures != 0) {
     std::cerr << failures << " of " << assertions << " assertions failed\n";
     return 1;

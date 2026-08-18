@@ -36,11 +36,8 @@ void discover_tables(const std::filesystem::path& directory,
               return left->generation > right->generation;
             });
   for (const auto& table : tables) {
-    for (const auto& [key, entry] : table->entries) {
-      static_cast<void>(key);
-      sequence = std::max(sequence, entry.sequence);
+      sequence = std::max(sequence, table->max_sequence);
     }
-  }
 }
 
 }  // namespace recovery

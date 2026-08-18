@@ -91,12 +91,18 @@ std::optional<std::string> LSMTree::get(const std::string& key) const {
       ++bloom_negative_hits_;
       continue;
     }
+    const std::ptrdiff_t block_index = find_block(*table, key);
+    if (block_index < 0) {
+      continue;
+    }
+    const auto entries = read_block(*table, static_cast<std::size_t>(block_index),
+                                    &sstable_read_stats_);
     const auto found = std::lower_bound(
-        table->entries.begin(), table->entries.end(), key,
+        entries.begin(), entries.end(), key,
         [](const auto& item, const std::string& target) {
           return item.first < target;
         });
-    if (found != table->entries.end() && found->first == key) {
+    if (found != entries.end() && found->first == key) {
       return found->second.tombstone
                  ? std::nullopt
                  : std::optional<std::string>(found->second.value);
@@ -112,14 +118,39 @@ std::vector<std::pair<std::string, std::string>> LSMTree::scan(
   }
   std::map<std::string, Entry> latest;
   for (const auto& table : tables_) {
-    for (const auto& [key, entry] : table->entries) {
-      if (key < begin || (!end.empty() && key >= end)) {
-        continue;
-      }
-      const auto current = latest.find(key);
-      if (current == latest.end() ||
-          current->second.sequence < entry.sequence) {
-        latest[key] = entry;
+    // First block whose first key is greater than `begin`; the range may
+    // start one block earlier because `begin` can fall inside that block.
+    const auto first_it = std::upper_bound(
+        table->index.begin(), table->index.end(), begin,
+        [](const std::string& target, const IndexEntry& entry) {
+          return target < entry.first_key;
+        });
+    const std::ptrdiff_t first =
+        std::max<std::ptrdiff_t>(0, first_it - table->index.begin() - 1);
+    std::ptrdiff_t last = static_cast<std::ptrdiff_t>(table->index.size()) - 1;
+    if (!end.empty()) {
+      const auto last_it = std::lower_bound(
+          table->index.begin(), table->index.end(), end,
+          [](const IndexEntry& entry, const std::string& target) {
+            return entry.first_key < target;
+          });
+      last = last_it - table->index.begin() - 1;
+    }
+    if (first > last) {
+      continue;
+    }
+    for (std::ptrdiff_t block = first; block <= last; ++block) {
+      const auto entries = read_block(
+          *table, static_cast<std::size_t>(block), &sstable_read_stats_);
+      for (const auto& [key, entry] : entries) {
+        if (key < begin || (!end.empty() && key >= end)) {
+          continue;
+        }
+        const auto current = latest.find(key);
+        if (current == latest.end() ||
+            current->second.sequence < entry.sequence) {
+          latest[key] = entry;
+        }
       }
     }
   }
@@ -177,8 +208,13 @@ void LSMTree::compact() {
 }
 
 Stats LSMTree::stats() const {
+  std::uint64_t metadata_bytes = 0;
+  for (const auto& table : tables_) {
+    metadata_bytes += table_metadata_bytes(*table);
+  }
   return {memtable_.size(), tables_.size(), sequence_, bloom_checks_,
-          bloom_negative_hits_};
+          bloom_negative_hits_, sstable_read_stats_.block_reads,
+          sstable_read_stats_.bytes_read, metadata_bytes};
 }
 
 }  // namespace lsm

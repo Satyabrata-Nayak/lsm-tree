@@ -34,7 +34,8 @@ flowchart LR
   T --> C["newest-first compaction"]
   R["get"] --> M
   R --> B
-  B -->|maybe present| T
+  B -->|maybe present| I["sparse index"]
+  I --> D["pread data block"]
   B -->|definitely absent| N["next generation"]
 ```
 
@@ -80,10 +81,11 @@ CRASH_ROUNDS=1000 make crash-test
 active.wal
   [magic | sequence | put/delete | key_len | value_len | payload | CRC32]...
 
-sst-N.dat
-  [magic | version | entry_count | bloom metadata]
+sst-N.dat (format version 2)
+  [magic | version | entry_count | max_sequence | Bloom metadata | block_count]
   [Bloom filter bytes]
-  [sequence | tombstone | key_len | value_len | key | value]...
+  [first_key | data_block_offset]...             sparse index
+  [sequence | tombstone | key_len | value_len | key | value]...  data blocks
   [whole-file CRC32]
 ```
 
@@ -140,9 +142,11 @@ keys, rejects values attached to tombstones, and refuses trailing bytes. A
 corrupt table fails open; it is never silently skipped, because skipping a
 newer generation could resurrect an older value.
 
-The in-memory table index retains keys and values in this compact
-implementation. A production successor would store sparse fence pointers and
-read blocks on demand.
+The in-memory table metadata retains only the Bloom filter and a sparse index
+of each data block's first key and offset. Point reads locate a candidate block
+with binary search, then use `pread` and binary search within that block. The
+engine validates every table at open time but does not retain table entries or
+values after validation. See [the Phase 9 design note](docs/sparse_sstable_index.md).
 
 ## Bloom filters
 
@@ -159,8 +163,10 @@ assert that the negative-hit counter moves.
 ## Reads and range scans
 
 Point reads check the memtable first, then immutable generations newest to
-oldest. Finding a tombstone ends the search; continuing would expose the value
-that tombstone deleted.
+oldest. For a Bloom-positive table, the sparse index selects a 4 KiB target
+data block, which is read on demand with `pread` and searched in memory.
+Finding a tombstone ends the search; continuing would expose the value that
+tombstone deleted.
 
 `scan(begin, end)` performs last-sequence-wins reconciliation across the active
 memtable and every immutable generation. It handles duplicate keys left by a
@@ -227,12 +233,16 @@ db.compact();
 ## Repository map
 
 ```text
-include/lsm/lsm.h       public API, options and statistics
-src/lsm.cpp             WAL, recovery, Bloom filter, SSTables and scans
-src/main.cpp            crash workload, oracle verifier and benchmark
+include/lsm/            public API and internal module interfaces
+src/lsm.cpp             public API orchestration and read paths
+src/wal.cpp              WAL append, replay and reset
+src/sstable.cpp          versioned SSTable, sparse index and block reads
+src/bloom.cpp            Bloom filter
+src/recovery.cpp         table discovery and recovery
+src/compaction.cpp       table merge/installation
+benchmarks/              configurable workloads and JSON reports
 tests/test_lsm.cpp       deterministic and randomized correctness suite
 scripts/crash_torture.py external process-kill campaign
-.github/workflows/ci.yml macOS/Linux tests, crashes and smoke benchmark
 ```
 
 ## What would come next

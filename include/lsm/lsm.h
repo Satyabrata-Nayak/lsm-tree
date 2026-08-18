@@ -48,6 +48,7 @@ class LSMTree {
   std::vector<std::shared_ptr<Table>> tables_;
   mutable std::uint64_t bloom_checks_ = 0;
   mutable std::uint64_t bloom_negative_hits_ = 0;
+  mutable ReadStats sstable_read_stats_;
 };
 
 }  // namespace lsm
