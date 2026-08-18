@@ -52,10 +52,14 @@ LSMTree::~LSMTree() {
 }
 
 void LSMTree::put(const std::string& key, const std::string& value) {
+  std::unique_lock<std::shared_mutex> lock(mutex_);
   mutate(key, value, false);
 }
 
-void LSMTree::erase(const std::string& key) { mutate(key, {}, true); }
+void LSMTree::erase(const std::string& key) {
+  std::unique_lock<std::shared_mutex> lock(mutex_);
+  mutate(key, {}, true);
+}
 
 void LSMTree::mutate(const std::string& key, const std::string& value,
                      bool tombstone) {
@@ -74,11 +78,22 @@ void LSMTree::mutate(const std::string& key, const std::string& value,
   memtable_[key] = {sequence, tombstone, value};
   memtable_size_ += key.size() + value.size();
   if (memtable_size_ >= options_.memtable_bytes) {
-    flush();
+    flush_unlocked();
   }
 }
 
 std::optional<std::string> LSMTree::get(const std::string& key) const {
+  std::shared_lock<std::shared_mutex> lock(mutex_);
+  ReadStats read_stats;
+  std::uint64_t bloom_checks = 0;
+  std::uint64_t bloom_negative_hits = 0;
+  const auto record_stats = [&] {
+    std::lock_guard<std::mutex> stats_lock(stats_mutex_);
+    bloom_checks_ += bloom_checks;
+    bloom_negative_hits_ += bloom_negative_hits;
+    sstable_read_stats_.block_reads += read_stats.block_reads;
+    sstable_read_stats_.bytes_read += read_stats.bytes_read;
+  };
   const auto memory = memtable_.find(key);
   if (memory != memtable_.end()) {
     return memory->second.tombstone
@@ -86,9 +101,9 @@ std::optional<std::string> LSMTree::get(const std::string& key) const {
                : std::optional<std::string>(memory->second.value);
   }
   for (const auto& table : tables_) {
-    ++bloom_checks_;
+    ++bloom_checks;
     if (!table->bloom.maybe_contains(key)) {
-      ++bloom_negative_hits_;
+      ++bloom_negative_hits;
       continue;
     }
     const std::ptrdiff_t block_index = find_block(*table, key);
@@ -96,26 +111,30 @@ std::optional<std::string> LSMTree::get(const std::string& key) const {
       continue;
     }
     const auto entries = read_block(*table, static_cast<std::size_t>(block_index),
-                                    &sstable_read_stats_);
+                                    &read_stats);
     const auto found = std::lower_bound(
         entries.begin(), entries.end(), key,
         [](const auto& item, const std::string& target) {
           return item.first < target;
         });
     if (found != entries.end() && found->first == key) {
+      record_stats();
       return found->second.tombstone
                  ? std::nullopt
                  : std::optional<std::string>(found->second.value);
     }
   }
+  record_stats();
   return std::nullopt;
 }
 
 std::vector<std::pair<std::string, std::string>> LSMTree::scan(
     const std::string& begin, const std::string& end) const {
+  std::shared_lock<std::shared_mutex> lock(mutex_);
   if (end < begin) {
     throw std::invalid_argument("scan end precedes begin");
   }
+  ReadStats read_stats;
   std::map<std::string, Entry> latest;
   for (const auto& table : tables_) {
     // First block whose first key is greater than `begin`; the range may
@@ -141,7 +160,7 @@ std::vector<std::pair<std::string, std::string>> LSMTree::scan(
     }
     for (std::ptrdiff_t block = first; block <= last; ++block) {
       const auto entries = read_block(
-          *table, static_cast<std::size_t>(block), &sstable_read_stats_);
+          *table, static_cast<std::size_t>(block), &read_stats);
       for (const auto& [key, entry] : entries) {
         if (key < begin || (!end.empty() && key >= end)) {
           continue;
@@ -170,10 +189,16 @@ std::vector<std::pair<std::string, std::string>> LSMTree::scan(
       output.push_back({key, entry.value});
     }
   }
+  record_read_stats(read_stats);
   return output;
 }
 
 void LSMTree::flush() {
+  std::unique_lock<std::shared_mutex> lock(mutex_);
+  flush_unlocked();
+}
+
+void LSMTree::flush_unlocked() {
   if (memtable_.empty()) {
     return;
   }
@@ -184,11 +209,16 @@ void LSMTree::flush() {
   memtable_.clear();
   memtable_size_ = 0;
   if (tables_.size() >= options_.compaction_trigger) {
-    compact();
+    compact_unlocked();
   }
 }
 
 void LSMTree::compact() {
+  std::unique_lock<std::shared_mutex> lock(mutex_);
+  compact_unlocked();
+}
+
+void LSMTree::compact_unlocked() {
   if (tables_.size() < 2) {
     return;
   }
@@ -208,6 +238,8 @@ void LSMTree::compact() {
 }
 
 Stats LSMTree::stats() const {
+  std::shared_lock<std::shared_mutex> lock(mutex_);
+  std::lock_guard<std::mutex> stats_lock(stats_mutex_);
   std::uint64_t metadata_bytes = 0;
   for (const auto& table : tables_) {
     metadata_bytes += table_metadata_bytes(*table);
@@ -215,6 +247,12 @@ Stats LSMTree::stats() const {
   return {memtable_.size(), tables_.size(), sequence_, bloom_checks_,
           bloom_negative_hits_, sstable_read_stats_.block_reads,
           sstable_read_stats_.bytes_read, metadata_bytes};
+}
+
+void LSMTree::record_read_stats(const ReadStats& stats) const {
+  std::lock_guard<std::mutex> lock(stats_mutex_);
+  sstable_read_stats_.block_reads += stats.block_reads;
+  sstable_read_stats_.bytes_read += stats.bytes_read;
 }
 
 }  // namespace lsm

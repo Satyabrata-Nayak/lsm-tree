@@ -1,6 +1,7 @@
 #include "lsm/lsm.h"
 
 #include <cstdio>
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -8,6 +9,7 @@
 #include <optional>
 #include <random>
 #include <string>
+#include <thread>
 #include <unistd.h>
 
 namespace {
@@ -338,6 +340,64 @@ void test_sparse_index_across_blocks() {
   reset(directory);
 }
 
+void test_concurrent_readers_with_writer() {
+  const auto directory = test_directory("concurrent-readers");
+  reset(directory);
+  lsm::Options options;
+  options.memtable_bytes = 2048;
+  options.compaction_trigger = 4;
+  options.sync_writes = false;
+  lsm::LSMTree database(directory, options);
+  for (int index = 0; index < 200; ++index) {
+    const std::string key = "stable-" + std::to_string(index);
+    database.put(key, "value-" + std::to_string(index));
+  }
+  database.flush();
+
+  std::atomic<bool> start{false};
+  std::atomic<bool> failed{false};
+  std::vector<std::thread> readers;
+  for (int reader = 0; reader < 4; ++reader) {
+    readers.emplace_back([&database, &failed, &start, reader] {
+      while (!start.load(std::memory_order_acquire)) {
+      }
+      for (int iteration = 0; iteration < 300; ++iteration) {
+        const int index = (reader * 37 + iteration) % 200;
+        const std::string key = "stable-" + std::to_string(index);
+        if (database.get(key) != "value-" + std::to_string(index)) {
+          failed.store(true, std::memory_order_release);
+        }
+        if (iteration % 25 == 0) {
+          const auto range = database.scan("stable-", "stable.");
+          if (range.size() != 200 || range.front().first != "stable-0" ||
+              range.back().first != "stable-99") {
+            failed.store(true, std::memory_order_release);
+          }
+        }
+      }
+    });
+  }
+  std::thread writer([&database, &start] {
+    while (!start.load(std::memory_order_acquire)) {
+    }
+    for (int iteration = 0; iteration < 600; ++iteration) {
+      database.put("mutable-" + std::to_string(iteration % 50),
+                   "value-" + std::to_string(iteration));
+    }
+    database.flush();
+  });
+
+  start.store(true, std::memory_order_release);
+  writer.join();
+  for (auto& reader : readers) {
+    reader.join();
+  }
+  CHECK(!failed.load(std::memory_order_acquire));
+  CHECK(database.get("mutable-49") == std::optional<std::string>("value-599"));
+  CHECK(database.stats().sstable_reads > 0);
+  reset(directory);
+}
+
 }  // namespace
 
 int main() {
@@ -351,6 +411,7 @@ int main() {
   test_randomized_differential_replay();
   test_corrupt_sstable_is_rejected();
   test_sparse_index_across_blocks();
+  test_concurrent_readers_with_writer();
   if (failures != 0) {
     std::cerr << failures << " of " << assertions << " assertions failed\n";
     return 1;

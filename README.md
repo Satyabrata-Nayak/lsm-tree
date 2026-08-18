@@ -241,6 +241,7 @@ src/bloom.cpp            Bloom filter
 src/recovery.cpp         table discovery and recovery
 src/compaction.cpp       table merge/installation
 benchmarks/              configurable workloads and JSON reports
+docs/concurrent_readers.md shared-reader concurrency design and benchmark
 tests/test_lsm.cpp       deterministic and randomized correctness suite
 scripts/crash_torture.py external process-kill campaign
 ```

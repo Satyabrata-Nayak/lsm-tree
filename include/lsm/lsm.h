@@ -5,7 +5,9 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <vector>
 
@@ -36,6 +38,9 @@ class LSMTree {
  private:
   void mutate(const std::string& key, const std::string& value,
               bool tombstone);
+  void flush_unlocked();
+  void compact_unlocked();
+  void record_read_stats(const ReadStats& stats) const;
 
   std::filesystem::path directory_;
   std::filesystem::path wal_path_;
@@ -46,6 +51,8 @@ class LSMTree {
   std::size_t memtable_size_ = 0;
   std::map<std::string, Entry> memtable_;
   std::vector<std::shared_ptr<Table>> tables_;
+  mutable std::shared_mutex mutex_;
+  mutable std::mutex stats_mutex_;
   mutable std::uint64_t bloom_checks_ = 0;
   mutable std::uint64_t bloom_negative_hits_ = 0;
   mutable ReadStats sstable_read_stats_;

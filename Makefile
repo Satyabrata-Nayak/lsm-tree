@@ -1,5 +1,6 @@
 CXX ?= clang++
 CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror
+CXXFLAGS += -pthread
 CPPFLAGS ?=
 CPPFLAGS += -Iinclude
 
@@ -16,8 +17,9 @@ LIB_OBJECTS := $(BUILD_DIR)/bloom.o $(BUILD_DIR)/sstable.o \
 TOOL := $(BUILD_DIR)/lsm_tool
 TEST := $(BUILD_DIR)/test_lsm
 BENCH := $(BUILD_DIR)/lsm_bench
+READER_BENCH := $(BUILD_DIR)/lsm_reader_bench
 
-.PHONY: all test crash-test benchmark bench bench-sweep clean
+.PHONY: all test crash-test benchmark bench bench-sweep reader-bench clean
 
 all: $(TOOL)
 
@@ -36,6 +38,9 @@ $(TEST): tests/test_lsm.cpp $(LIB_OBJECTS)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) $^ -o $@
 
 $(BENCH): benchmarks/benchmark_driver.cpp $(LIB_OBJECTS)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) $^ -o $@
+
+$(READER_BENCH): benchmarks/reader_scaling.cpp $(LIB_OBJECTS)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) $^ -o $@
 
 test: $(TEST)
@@ -58,6 +63,9 @@ bench: $(BENCH)
 # Controlled experiments across the memtable / bloom / compaction grid.
 bench-sweep: $(BENCH)
 	bash scripts/run_experiments.sh
+
+reader-bench: $(READER_BENCH)
+	./$(READER_BENCH) $(BUILD_DIR)/reader-bench.db
 
 clean:
 	rm -rf $(BUILD_DIR)
