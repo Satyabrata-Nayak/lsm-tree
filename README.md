@@ -3,7 +3,7 @@
 A dependency-free C++17 log-structured merge-tree storage engine built from
 first principles.
 
-[![CI](https://github.com/asp53826/lsm-tree/actions/workflows/ci.yml/badge.svg)](https://github.com/asp53826/lsm-tree/actions/workflows/ci.yml)
+[![CI](https://github.com/Satyabrata-Nayak/lsm-tree/actions/workflows/ci.yml/badge.svg)](https://github.com/Satyabrata-Nayak/lsm-tree/actions/workflows/ci.yml)
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C?style=flat-square)
 ![dependencies](https://img.shields.io/badge/runtime_dependencies-0-2ea44f?style=flat-square)
 
@@ -22,7 +22,8 @@ first principles.
 - compaction durably installs a replacement before deleting old generations;
 - incomplete WAL tails are detected and repaired to the verified record
   boundary;
-- SSTable corruption is rejected instead of silently returning suspect data.
+- SSTable corruption is rejected instead of silently returning suspect data;
+- many concurrent readers run against one writer under a `std::shared_mutex`.
 
 ```mermaid
 flowchart LR
@@ -45,7 +46,7 @@ Apple M2 Pro, macOS, Apple Clang 17:
 
 | Check | Result |
 |---|---:|
-| Correctness assertions | **4,064 passed** |
+| Correctness assertions | **4,587 passed** |
 | Seeded differential operations | 2,000 across five restarts |
 | Randomized hard-crash rounds | 100 |
 | Independently acknowledged writes lost | **0** |
@@ -98,7 +99,9 @@ cannot expose an older value.
 
 This is a compact educational engine, not a RocksDB replacement. It currently
 has one writer, loads table indexes into memory, uses size-triggered full
-compaction, and does not implement snapshots or concurrent readers. The tests
+compaction, and does not implement snapshots. Concurrent readers are supported
+(one writer, many readers) but there is no background flush or compaction. The
+tests
 focus on the invariants those future features must preserve.
 
 No database, serialization library, checksum package, Bloom-filter package, or
@@ -191,7 +194,7 @@ does not pretend to have that proof.
 
 ## Verification strategy
 
-The 4,064 assertions include:
+The 4,587 assertions include:
 
 - values, overwrites and deletes across process reopen;
 - newest-version-wins reads across multiple SSTables;
@@ -201,7 +204,9 @@ The 4,064 assertions include:
 - damaged WAL tail repair;
 - 2,000 seeded random mutations checked against `std::map` through five
   reopen cycles;
-- automatic flush and compaction under a 90-byte memtable limit.
+- automatic flush and compaction under a 90-byte memtable limit;
+- four concurrent readers against one writer performing 600 updates with
+  automatic flushes and compactions.
 
 The crash harness is deliberately external. A Python parent launches a writer,
 enables seven-byte physical writes, waits a seeded random interval, sends
@@ -251,7 +256,7 @@ scripts/crash_torture.py external process-kill campaign
 - block-based SSTables with sparse fence pointers and a block cache;
 - leveled or size-tiered compaction instead of full-table merging;
 - manifest/version sets for atomic table membership;
-- snapshots and concurrent readers;
+- snapshots and lock-free version publication;
 - background flush/compaction;
 - prefix compression and restart points;
 - tombstone collection once lower-level overlap is provably absent.
